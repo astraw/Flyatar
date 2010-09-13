@@ -96,11 +96,10 @@ class VirtualMotor(object):
         self._last_usb = -np.inf
         now = time.time()
         dur = now-self._last_usb
-        minimum_usb_cycle_duration = 0.3
+        minimum_usb_cycle_duration = 0.05 # only hit ROS this often
         while 1:
             if dur > minimum_usb_cycle_duration:
                 break
-            # only hit USB every 100 msec
             target = (self._last_usb+minimum_usb_cycle_duration)-now
             time.sleep(target)
             now = time.time()
