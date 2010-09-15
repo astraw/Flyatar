@@ -65,7 +65,6 @@
 #define USB_CMD_LOOKUP_TABLE_FILL        4
 #define USB_CMD_LOOKUP_TABLE_POS_MOVE    5
 #define USB_CMD_LOOKUP_TABLE_VEL_MOVE    6
-#define USB_CMD_LOOKUP_TABLE_VEL_CORRECT 7
 #define USB_CMD_AVR_RESET                200
 #define USB_CMD_AVR_DFU_MODE             201
 
@@ -208,9 +207,7 @@ uint8_t                 LookupTableVelMove=FALSE;
 uint8_t                 MotorUpdateBits=0;
 volatile uint8_t        AllMotorsInPosition=FALSE;
 uint8_t                 LookupTableMoveComplete=FALSE;
-LookupTableRow_t        LookupTableCorrection;
-uint8_t                 LookupTableCorrectionOn=FALSE;
-LookupTableRow_t        LookupTableRowCorrected;
+uint8_t                 MotorsHomed=FALSE;
 
 /* Task Definitions: */
 TASK(USB_ProcessPacket);
@@ -238,8 +235,8 @@ static void Motor_Update_All(void);
 static void Motor_Set_Values(LookupTableRow_t MotorSetpoint,uint8_t Motor_N);
 static void Motor_Set_Values_All(LookupTableRow_t MotorSetpoint);
 static void Motor_Home(void);
+static void Motor_Check_In_Position(void);
 static void Lookup_Table_Fill(LookupTableRow_t *LookupTableEntries,uint8_t EntryCount,uint8_t EntryLocation);
-static void Lookup_Table_Correct(LookupTableRow_t LookupTableRowUncorrected);
 static void Position_Update(volatile uint8_t Motor_N);
 #endif
 

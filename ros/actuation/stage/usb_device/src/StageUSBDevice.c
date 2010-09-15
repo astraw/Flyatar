@@ -92,9 +92,6 @@ int main(void)
   /* Initialize Software Interrupt */
   Interrupt_Init();
 
-  /* Home Motors */
-  Motor_Home();
-
   /* Scheduling - routine never returns, so put this last in the main function */
   Scheduler_Start();
 }
@@ -109,6 +106,7 @@ void EVENT_USB_Connect(void)
 
   /* Indicate USB enumerating */
   UpdateStatus(Status_USBEnumerating);
+
 }
 
 /** Event handler for the USB_Disconnect event. This indicates that the device is no longer connected to a host via
@@ -137,6 +135,12 @@ void EVENT_USB_ConfigurationChanged(void)
   Endpoint_ConfigureEndpoint(IN_EPNUM, EP_TYPE_BULK,
                              ENDPOINT_DIR_IN, IN_EPSIZE,
                              ENDPOINT_BANK_SINGLE);
+
+  /* Home Motors */
+  if (!MotorsHomed)
+    {
+      Motor_Home();
+    }
 
   /* Indicate USB connected and ready */
   UpdateStatus(Status_USBReady);
@@ -225,7 +229,6 @@ TASK(USB_ProcessPacket)
                     MotorUpdateBits = USBPacketOut.MotorUpdate;
                     LookupTablePosMove = FALSE;
                     LookupTableVelMove = FALSE;
-                    LookupTableCorrectionOn = FALSE;
                     Motor_Set_Values_All(USBPacketOut.Setpoint[0]);
                     Motor_Update_All();
                   }
@@ -244,7 +247,6 @@ TASK(USB_ProcessPacket)
                   {
                     LookupTablePosMove = FALSE;
                     LookupTableVelMove = FALSE;
-                    LookupTableCorrectionOn = FALSE;
                     if (USBPacketOut.EntryLocation < LOOKUP_TABLE_SIZE)
                       {
                         Lookup_Table_Fill(USBPacketOut.Setpoint,USBPacketOut.EntryCount,USBPacketOut.EntryLocation);
@@ -260,33 +262,18 @@ TASK(USB_ProcessPacket)
                     MotorUpdateBits = USBPacketOut.MotorUpdate;
                     LookupTablePosMove = TRUE;
                     LookupTableMoveComplete = FALSE;
-                    LookupTableCorrectionOn = FALSE;
 
                     TableEntry = 0;
                     if (TableEntry < TableEnd)
                       {
-                        Motor_Set_Values_All(LookupTable[TableEntry]);
                         TableEntry++;
+                        Motor_Set_Values_All(LookupTable[TableEntry-1]);
                         Motor_Update_All();
                       }
                     else
                       {
                         LookupTablePosMove = FALSE;
                       }
-                  }
-                  break;
-                case USB_CMD_LOOKUP_TABLE_VEL_CORRECT:
-                  {
-                    ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-                    {
-                      /* LookupTableCorrection = USBPacketOut.Setpoint[0]; */
-                      /* Cannot save an entire LookupTableRow? */
-                      for ( uint8_t Motor_N=0; Motor_N<MOTOR_NUM; Motor_N++ )
-                        {
-                          LookupTableCorrection[Motor_N] = USBPacketOut.Setpoint[0][Motor_N];
-                        }
-                    }
-                    LookupTableCorrectionOn = TRUE;
                   }
                   break;
                 case USB_CMD_LOOKUP_TABLE_VEL_MOVE:
@@ -298,7 +285,6 @@ TASK(USB_ProcessPacket)
                     MotorUpdateBits = USBPacketOut.MotorUpdate;
                     LookupTableVelMove = TRUE;
                     LookupTableMoveComplete = FALSE;
-                    LookupTableCorrectionOn = FALSE;
                     TableEntry = 0;
                     Timer_On(0);
                   }
@@ -645,7 +631,6 @@ static void Motor_Home(void)
 
   LookupTablePosMove = FALSE;
   LookupTableVelMove = FALSE;
-  LookupTableCorrectionOn = FALSE;
 
   /* External interrupts initialization */
   /* Disable external interrupt pins 0:2 before changing interrupt sense control */
@@ -675,6 +660,8 @@ static void Motor_Home(void)
   MotorHomeParameters[1].Position = 0;
   Motor_Set_Values(MotorHomeParameters,1);
   Motor_Update(1);
+
+  MotorsHomed = TRUE;
 }
 
 static void Motor_Update(uint8_t Motor_N)
@@ -765,10 +752,6 @@ static void Motor_Update(uint8_t Motor_N)
 
 static void Motor_Update_All(void)
 {
-  /* Set InPositionPin low (PORTE pin 5) */
-  /* PORTE &= ~(1<<PE5); */
-  AllMotorsInPosition = FALSE;
-
   for ( uint8_t Motor_N=0; Motor_N<MOTOR_NUM; Motor_N++ )
     {
       Motor[Motor_N].Update = (MotorUpdateBits & (1<<Motor_N));
@@ -810,6 +793,7 @@ static void Motor_Set_Values(LookupTableRow_t MotorSetpoint, uint8_t Motor_N)
       {
         Motor[Motor_N].PositionSetPoint = MotorSetpoint[Motor_N].Position;
       }
+    Motor[Motor_N].InPosition = FALSE;
     if (Motor[Motor_N].PositionSetPoint > Motor[Motor_N].Position)
       {
         Motor[Motor_N].Direction = Motor[Motor_N].DirectionPos;
@@ -821,18 +805,41 @@ static void Motor_Set_Values(LookupTableRow_t MotorSetpoint, uint8_t Motor_N)
     else
       {
         Motor[Motor_N].Frequency = 0;
+        Motor[Motor_N].InPosition = TRUE;
       }
   }
 }
 
 static void Motor_Set_Values_All(LookupTableRow_t MotorSetpoint)
 {
+  /* Set InPositionPin low (PORTE pin 5) */
+  /* PORTE &= ~(1<<PE5); */
+  AllMotorsInPosition = FALSE;
+
   for ( uint8_t Motor_N=0; Motor_N<MOTOR_NUM; Motor_N++ )
     {
       Motor[Motor_N].Update = (MotorUpdateBits & (1<<Motor_N));
       if (Motor[Motor_N].Update)
         {
           Motor_Set_Values(MotorSetpoint,Motor_N);
+        }
+    }
+  Motor_Check_In_Position();
+}
+
+static void Motor_Check_In_Position(void)
+{
+  /* If all motors are in position, set InPosition interrupt */
+  if (Motor[0].InPosition && Motor[1].InPosition && Motor[2].InPosition)
+    {
+      /* Set InPositionPin high (PORTE pin 5) */
+      /* PORTE |= (1<<PE5); */
+      AllMotorsInPosition = TRUE;
+
+      if (LookupTablePosMove)
+        {
+          /* Set interrupt 4 low to enable interrupt (PORTE pin 4) */
+          PORTE &= ~(1<<PE4);
         }
     }
 }
@@ -853,47 +860,6 @@ static void Lookup_Table_Fill(LookupTableRow_t *LookupTableEntries,uint8_t Entry
         }
     }
 }
-
-static void Lookup_Table_Correct(LookupTableRow_t LookupTableRowUncorrected)
-{
-  int32_t Velocity;
-  int32_t Velocity_Correction;
-
-  for ( uint8_t Motor_N=0; Motor_N<MOTOR_NUM; Motor_N++ )
-    {
-      if (LookupTableRowUncorrected[Motor_N].Position < Motor[Motor_N].Position)
-        {
-          Velocity = -(int32_t)LookupTableRowUncorrected[Motor_N].Frequency;
-        }
-      else
-        {
-          Velocity = (int32_t)LookupTableRowUncorrected[Motor_N].Frequency;
-        }
-
-      if (LookupTableCorrection[Motor_N].Position < Motor[Motor_N].Position)
-        {
-          Velocity_Correction = -(int32_t)LookupTableCorrection[Motor_N].Frequency;
-        }
-      else
-        {
-          Velocity_Correction = (int32_t)LookupTableCorrection[Motor_N].Frequency;
-        }
-
-      Velocity += Velocity_Correction;
-
-      if (0 < Velocity)
-        {
-          LookupTableRowCorrected[Motor_N].Position = UINT16_MAX;
-          LookupTableRowCorrected[Motor_N].Frequency = (uint16_t)Velocity;
-        }
-      else
-        {
-          LookupTableRowCorrected[Motor_N].Position = UINT16_MIN;
-          LookupTableRowCorrected[Motor_N].Frequency = (uint16_t)(-Velocity);
-        }
-    }
-}
-
 
 #define POSITION_UPDATE(Motor_N)                                                   \
 uint8_t Timer_N;                                                                   \
@@ -925,18 +891,7 @@ if (*Timer[Timer_N].Address.PinPort & (1<<Timer[Timer_N].OutputPin))            
           }                                                                        \
                                                                                    \
         /* If all motors are in position, set InPosition interrupt */              \
-        if (Motor[0].InPosition && Motor[1].InPosition && Motor[2].InPosition)     \
-          {                                                                        \
-            /* Set InPositionPin high (PORTE pin 5) */                             \
-            /* PORTE |= (1<<PE5); */                                               \
-            AllMotorsInPosition = TRUE;                                            \
-                                                                                   \
-            if (LookupTablePosMove)                                                \
-              {                                                                    \
-                /* Set interrupt 4 low to enable interrupt (PORTE pin 4) */        \
-                PORTE &= ~(1<<PE4);                                                \
-              }                                                                    \
-          }                                                                        \
+        Motor_Check_In_Position();                                                 \
       }                                                                            \
     else if (Motor[Motor_N].InPosition)                                            \
       {                                                                            \
@@ -1283,16 +1238,8 @@ ISR(LOOKUP_TABLE_JUMP_INTERRUPT)
 
       if (TableEntry < TableEnd)
         {
-          if (LookupTableVelMove && LookupTableCorrectionOn)
-            {
-              Lookup_Table_Correct(LookupTable[TableEntry]);
-              Motor_Set_Values_All(LookupTableRowCorrected);
-            }
-          else
-            {
-              Motor_Set_Values_All(LookupTable[TableEntry]);
-            }
           TableEntry++;
+          Motor_Set_Values_All(LookupTable[TableEntry-1]);
           Motor_Update_All();
         }
       else
