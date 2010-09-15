@@ -5,10 +5,31 @@ from stage.msg import StageCommands
 import numpy as np
 import time
 from stage.srv import Stage_StateRequest, Stage_State
-import subprocess
+import subprocess, threading
 
 # This is hardcoded in the USB device that sends commands.
 VELOCITY_STEP_DUR = 0.016
+
+class DoThread(threading.Thread):
+    def doit(self,**kwargs):
+        self.done_callback = kwargs.get('callback',None)
+        self.motor = kwargs['vm']
+
+        del kwargs['callback']
+        del kwargs['vm']
+        self.kwargs =kwargs
+
+        self.start()
+
+    def run(self):
+        kwargs = self.kwargs
+        x = kwargs['x']
+        y = kwargs['y']
+        del kwargs['x']
+        del kwargs['y']
+        self.motor.goto_blocking(x,y,**kwargs)
+        if self.done_callback is not None:
+            self.done_callback()
 
 class VirtualMotor(object):
     def __init__(self):
@@ -20,6 +41,11 @@ class VirtualMotor(object):
         self._get_stage_state_proxy = rospy.ServiceProxy('get_stage_state',
                                                          Stage_State)
         self._last_usb = -np.inf
+
+    def goto_async(self,x,y,dur=1.0,xtol=1.0,ytol=1.0, callback=None):
+        do_thread = DoThread()
+        do_thread.setDaemon(True)
+        do_thread.doit(x=x,y=y,dur=dur,xtol=xtol,ytol=ytol, callback=callback, vm=self)
 
     def goto_blocking(self,x,y,dur=1.0,xtol=1.0,ytol=1.0):
         """goto position x,y, in dur seconds"""

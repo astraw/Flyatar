@@ -7,6 +7,7 @@ import time
 from stage.srv import Stage_StateRequest, Stage_State
 import subprocess
 from virtual_motor import VirtualMotor
+import threading
 
 class App(object):
     def __init__(self):
@@ -15,37 +16,20 @@ class App(object):
                         )
         rospy.wait_for_service('get_stage_state')
         self._home = (120,115)
+        self.is_home = threading.Event()
         self.virtual_motor = VirtualMotor()
 
-    def goto_blocking(self,*args,**kws):
-        self.virtual_motor.goto_blocking(*args,**kws)
-
-    def go_home_blocking(self,dur=3.0):
-        self.goto_blocking(self._home[0],self._home[1],dur)
-
-    def circle(self,x0=120,y0=120,r=50,n_pts=20,dur=10.0):
-        theta = np.linspace(0,2*np.pi,100)
-        x = r*np.cos(theta)+x0
-        y = r*np.sin(theta)+y0
-        for (xi,yi) in zip(x,y):
-            self.goto_blocking(xi,yi,dur=dur/n_pts)
+    def start_going_home(self):
+        self.virtual_motor.goto_async( self._home[0], self._home[1], dur=1.0, callback=lambda : self.is_home.set())
 
     def run(self):
-        #self.go_home_blocking()
-        self.star()
+        self.start_going_home()
+        print 'going home'
+        self.is_home.wait()
+        print 'got home'
 
-    def star(self):
-        n = 5
-        theta = np.linspace(0,2*np.pi,n+1)[:n]
-        r = 50
-        x0,y0 = self._home
-        xs = r*np.cos(theta)+x0
-        ys = r*np.sin(theta)+y0
-
-        self.go_home_blocking()
-        for x,y in zip(xs,ys):
-            self.goto_blocking(x,y)
-            self.go_home_blocking()
+        self.virtual_motor.goto_async( 150, 150, dur=1.0 )
+        time.sleep(1.1)
 
 if __name__=='__main__':
     app = App()
