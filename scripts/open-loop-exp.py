@@ -7,6 +7,9 @@ import time
 from stage.srv import Stage_StateRequest, Stage_State
 import subprocess
 
+# This is hardcoded in the USB device that sends commands.
+VELOCITY_STEP_DUR = 0.016
+
 class VirtualMotor(object):
     def __init__(self):
         self._publisher = rospy.Publisher('/Stage/Commands',
@@ -52,46 +55,33 @@ class VirtualMotor(object):
             vx = dx/dur
             vy = dy/dur
 
-            n_steps = int(round(dur/ 0.060)) # 60 msec per step
+            vel_mag = abs(np.sqrt( vx**2 + vy**2))
+
+            n_steps = int(round(dur/ VELOCITY_STEP_DUR))
             n_steps = max(1,n_steps)
 
             if 1:
+                # in position mode, we just do one step
                 n_steps=1
-
-            if 0:
-                n_steps=1
-                vx=50
-                vy=50
 
             msg = StageCommands()
-            
-            msg.position_control = True
-            msg.velocity_control = False
-            msg.lookup_table_correct = False
-            
-            print 'response.x,response.y,x,y, vx,vy,n_steps',response.x,response.y,x,y, vx,vy,n_steps
+
             msg.x_position = [x]*n_steps
             msg.y_position = [y]*n_steps
-            msg.x_velocity = [vx]*n_steps
-            msg.y_velocity = [vy]*n_steps
-            self.publish(msg)
+            msg.x_velocity = []
+            msg.y_velocity = []
+            msg.velocity_magnitude = [vel_mag]*n_steps
+            if vel_mag != 0.0:
+                self.publish(msg)
         while 1:
             response = self.get_stage_state()
-            #print 'response.header.stamp',response.header.stamp
-            #print response.x
-            #print response.y
             if ((abs(x-response.x) < xtol) and
                 (abs(y-response.y) < ytol)):
                 break
         time.sleep(0.5)
 
-        #time.sleep(dur)
-        #print 'dur',dur
-
-
     # All this stuff is so we don't confuse the motor device by too
     # frequent commands.
-
     def _throttle_usb(self):
         self._last_usb = -np.inf
         now = time.time()
