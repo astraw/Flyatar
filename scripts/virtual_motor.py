@@ -19,33 +19,9 @@ class VirtualMotor(object):
                                           )
         self._get_stage_state_proxy = rospy.ServiceProxy('get_stage_state',
                                                          Stage_State)
-        self.goto_blocking = self.goto_blocking_ros
-        #self.goto_blocking = self.goto_blocking_subprocess
         self._last_usb = -np.inf
 
-    def goto_blocking_subprocess(self,x,y,dur=3.0):
-        response = self.get_stage_state()
-        print response.x, response.y
-
-        dx = x-response.x
-        dy = y-response.y
-
-        vx = dx/dur
-        vy = dy/dur
-
-        cmd = 'rostopic pub -1 /Stage/Commands stage/StageCommands -- True False False [%f] [%f] [%f] [%f]'%(x,y,vx,vy)
-        tstart=time.time()
-        subprocess.check_call(cmd,shell=True)
-        while 1:
-            now = time.time()
-            if (now-tstart) >= dur:
-                break
-            sleep_dur = (tstart+dur)-now
-            time.sleep(sleep_dur)
-        response = self.get_stage_state()
-        print response.x, response.y
-
-    def goto_blocking_ros(self,x,y,dur=1.0,xtol=1.0,ytol=1.0):
+    def goto_blocking(self,x,y,dur=1.0,xtol=1.0,ytol=1.0):
         """goto position x,y, in dur seconds"""
         if 1:
             response = self.get_stage_state()
