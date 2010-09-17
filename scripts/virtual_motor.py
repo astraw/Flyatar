@@ -1,5 +1,5 @@
 import roslib
-roslib.load_manifest('stage_tf')
+roslib.load_manifest('stage_message_interface')
 import rospy
 from stage.msg import StageCommands
 import numpy as np
