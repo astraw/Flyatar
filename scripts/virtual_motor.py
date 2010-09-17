@@ -38,6 +38,7 @@ class VirtualMotor(object):
                                           tcp_nodelay=True,
                                           latch=True,
                                           )
+        rospy.wait_for_service('get_stage_state')
         self._get_stage_state_proxy = rospy.ServiceProxy('get_stage_state',
                                                          Stage_State)
         self._last_usb = -np.inf
